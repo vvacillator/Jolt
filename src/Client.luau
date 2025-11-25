@@ -26,7 +26,7 @@ function Client.new(name: string)
 	self._remote = Remotes.Get(name)
 	self._outgoing = nil :: Buffers.Writer?
 	self._requests = {} :: {[number]: thread}
-	self._listeners = {} :: { (any) -> () }
+	self._listeners = {} :: {[(...any) -> ()]: true}
 	self._reqId = 0
 
 	self._remote.OnClientEvent:Connect(function(buff, insts)
@@ -38,21 +38,17 @@ function Client.new(name: string)
 	return self
 end
 
-function Client:Connect(callback: (any) -> ())
-	table.insert(self._listeners, callback)
+function Client:Connect(callback: (...any) -> ())
+	self._listeners[callback] = true
 
 	return {
 		Disconnect = function()
-			local idx = table.find(self._listeners, callback)
-
-			if idx then 
-				table.remove(self._listeners, idx) 
-			end
-		end
+			self._listeners[callback] = nil
+		end,
 	}
 end
 
-function Client:Fire(val: any)
+function Client:Fire(...: any)
 	local w = self._outgoing
 
 	if not w then
@@ -61,10 +57,10 @@ function Client:Fire(val: any)
 	end
 
 	Buffers.WriteByte(w, PACKET_EVENT)
-	Buffers.WriteAny(w, val)
+	Buffers.Pack(w, ...)
 end
 
-function Client:Invoke(val: any)
+function Client:Invoke(...: any)
 	local id = self._reqId
 	self._reqId += 1
 
@@ -77,7 +73,7 @@ function Client:Invoke(val: any)
 
 	Buffers.WriteByte(w, PACKET_REQUEST)
 	Buffers.WriteVarInt(w, id)
-	Buffers.WriteAny(w, val)
+	Buffers.Pack(w, ...)
 
 	local thread = coroutine.running()
 	self._requests[id] = thread
@@ -115,21 +111,20 @@ function Client:_incoming(b: buffer, i: {Instance})
 		local type = Buffers.ReadByte(r)
 
 		if type == PACKET_EVENT then
-			local val = Buffers.ReadAny(r)
-			local listeners = table.clone(self._listeners)
+			local vals = Buffers.Unpack(r)
 
-			for _, cb in ipairs(listeners) do
-				task.spawn(cb, val)
+			for cb in pairs(self._listeners) do
+				task.spawn(cb, table.unpack(vals))
 			end
 		elseif type == PACKET_RESPONSE then
 			local id = Buffers.ReadVarInt(r)
 			local ok = Buffers.ReadByte(r) == 1
-			local val = Buffers.ReadAny(r)
+			local vals = Buffers.Unpack(r)
 			local thread = self._requests[id]
 
 			if thread then
 				self._requests[id] = nil
-				task.spawn(thread, ok, val)
+				task.spawn(thread, ok, table.unpack(vals))
 			end
 		else
 			break
