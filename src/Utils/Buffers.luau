@@ -55,6 +55,8 @@ local TYPE_VECTOR2 = 17
 local writerPool = {} :: {Writer}
 local readerPool = {} :: {Reader}
 
+local MAX_POOL_SIZE = 64
+
 local function resize(w: Writer, needed: number)
 	local newLen = math.max(w.len * 2, needed)
 	local newBuff = buffer_create(newLen)
@@ -83,9 +85,11 @@ function Buffers.CreateWriter(): Writer
 end
 
 function Buffers.FreeWriter(w: Writer)
-	w.cursor = 0
-	table.clear(w.refs)
-	table.insert(writerPool, w)
+	if #writerPool < MAX_POOL_SIZE then
+		w.cursor = 0
+		table.clear(w.refs)
+		table.insert(writerPool, w)
+	end
 end
 
 function Buffers.CreateReader(b: buffer, refs: {Instance}?): Reader
@@ -106,8 +110,10 @@ function Buffers.CreateReader(b: buffer, refs: {Instance}?): Reader
 end
 
 function Buffers.FreeReader(r: Reader)
-	r.refs = nil
-	table.insert(readerPool, r)
+	if #readerPool < MAX_POOL_SIZE then
+		r.refs = nil
+		table.insert(readerPool, r)
+	end
 end
 
 function Buffers.Finalize(w: Writer): (buffer, {Instance})
@@ -327,11 +333,18 @@ end
 
 function Buffers.ReadEnum(r: Reader): EnumItem?
 	local s = Buffers.ReadString(r)
-	local enumName, itemName = string.match(s, "Enum%.(%w+)%.(%w+)")
-	if enumName then
+	local parts = s:split(".")
+
+	if #parts == 3 then
+		local enumName = parts[2]
+		local itemName = parts[3]
 		local enum = (Enum :: any)[enumName]
-		if enum then return enum[itemName] end
+
+		if enum then
+			return enum[itemName]
+		end
 	end
+
 	return nil
 end
 
@@ -521,6 +534,23 @@ function Buffers.ReadAny(r: Reader): any
 		warn("Unknown type tag:", t)
 		return nil
 	end
+end
+
+function Buffers.Pack(w: Writer, ...)
+	local n = select("#", ...)
+	Buffers.WriteByte(w, n)
+	for i = 1, n do
+		Buffers.WriteAny(w, select(i, ...))
+	end
+end
+
+function Buffers.Unpack(r: Reader): {any}
+	local n = Buffers.ReadByte(r)
+	local results = {}
+	for _ = 1, n do
+		table.insert(results, Buffers.ReadAny(r))
+	end
+	return results
 end
 
 return Buffers
