@@ -38,9 +38,10 @@ local TYPE_NUMBER = 2
 local TYPE_STRING = 3
 local TYPE_TABLE = 4
 local TYPE_VECTOR3 = 5
-local TYPE_CFRAME = 6
+local TYPE_CFRAME_FULL = 6
 local TYPE_COLOR3 = 7
 local TYPE_INSTANCE = 8
+local TYPE_CFRAME_POS = 18
 local TYPE_BOOL_TRUE = 9
 local TYPE_BOOL_FALSE = 10
 local TYPE_ENUM = 11
@@ -268,11 +269,11 @@ function Buffers.ReadCFrame(r: Reader): CFrame
 	local theta = (theta_u16 / U16_MAX) * PI
 
 	local sin_theta = math.sin(theta)
-	
+
 	local axis_x = sin_theta * math.sin(phi)
 	local axis_y = math.cos(theta)
 	local axis_z = sin_theta * math.cos(phi)
-	
+
 	local axis = Vector3.new(axis_x, axis_y, axis_z)
 
 	return CFrame.new(px, py, pz) * CFrame.fromAxisAngle(axis, angle)
@@ -404,9 +405,8 @@ function Buffers.ReadTable(r: Reader): {[any]: any}
 	return t
 end
 
-function Buffers.WriteAny(w: Writer, v: any)
-	local t = typeof(v)
-	if t == "number" then
+local TypeWriters = {
+	number = function(w, v)
 		if v % 1 == 0 and v >= -2147483648 and v <= 2147483647 then
 			Buffers.WriteByte(w, TYPE_INTEGER)
 			Buffers.WriteZigZag(w, v)
@@ -414,46 +414,97 @@ function Buffers.WriteAny(w: Writer, v: any)
 			Buffers.WriteByte(w, TYPE_NUMBER)
 			Buffers.WriteNumber(w, v)
 		end
-	elseif t == "string" then
+	end,
+	string = function(w, v)
 		Buffers.WriteByte(w, TYPE_STRING)
 		Buffers.WriteString(w, v)
-	elseif t == "boolean" then
+	end,
+	boolean = function(w, v)
 		Buffers.WriteByte(w, v and TYPE_BOOL_TRUE or TYPE_BOOL_FALSE)
-	elseif t == "table" then
+	end,
+	table = function(w, v)
 		Buffers.WriteByte(w, TYPE_TABLE)
 		Buffers.WriteTable(w, v)
-	elseif t == "Instance" then
+	end,
+	Instance = function(w, v)
 		Buffers.WriteByte(w, TYPE_INSTANCE)
 		Buffers.WriteInstance(w, v)
-	elseif t == "Vector3" then
+	end,
+	Vector3 = function(w, v)
 		Buffers.WriteByte(w, TYPE_VECTOR3)
 		Buffers.WriteVector3(w, v)
-	elseif t == "CFrame" then
-		Buffers.WriteByte(w, TYPE_CFRAME)
-		Buffers.WriteCFrame(w, v)
-	elseif t == "Color3" then
+	end,
+	CFrame = function(w, v)
+		local px, py, pz, r00, r01, r02, r10, r11, r12, r20, r21, r22 = v:GetComponents()
+
+		if r00 == 1 and r01 == 0 and r02 == 0 and r10 == 0 and r11 == 1 and r12 == 0 and r20 == 0 and r21 == 0 and r22 == 1 then
+			Buffers.WriteByte(w, TYPE_CFRAME_POS)
+			Buffers.WriteVector3(w, v.Position)
+		else
+			Buffers.WriteByte(w, TYPE_CFRAME_FULL)
+			Buffers.WriteCFrame(w, v)
+		end
+	end,
+	Color3 = function(w, v)
 		Buffers.WriteByte(w, TYPE_COLOR3)
 		Buffers.WriteColor3(w, v)
-	elseif t == "BrickColor" then
+	end,
+	BrickColor = function(w, v)
 		Buffers.WriteByte(w, TYPE_BRICKCOLOR)
 		Buffers.WriteBrickColor(w, v)
-	elseif t == "Vector2" then
+	end,
+	Vector2 = function(w, v)
 		Buffers.WriteByte(w, TYPE_VECTOR2)
 		Buffers.WriteVector2(w, v)
-	elseif t == "EnumItem" then
+	end,
+	EnumItem = function(w, v)
 		Buffers.WriteByte(w, TYPE_ENUM)
 		Buffers.WriteEnum(w, v)
-	elseif t == "UDim2" then
+	end,
+	UDim2 = function(w, v)
 		Buffers.WriteByte(w, TYPE_UDIM2)
 		Buffers.WriteUDim2(w, v)
-	elseif t == "UDim" then
+	end,
+	UDim = function(w, v)
 		Buffers.WriteByte(w, TYPE_UDIM)
 		Buffers.WriteUDim(w, v)
-	elseif t == "TweenInfo" then
+	end,
+	TweenInfo = function(w, v)
 		Buffers.WriteByte(w, TYPE_TWEENINFO)
 		Buffers.WriteTweenInfo(w, v)
-	elseif t == "nil" then
+	end,
+	["nil"] = function(w, v)
 		Buffers.WriteByte(w, TYPE_NIL)
+	end,
+}
+
+local TypeReaders = {
+	[TYPE_NUMBER] = Buffers.ReadNumber,
+	[TYPE_INTEGER] = Buffers.ReadZigZag,
+	[TYPE_STRING] = Buffers.ReadString,
+	[TYPE_BOOL_TRUE] = function() return true end,
+	[TYPE_BOOL_FALSE] = function() return false end,
+	[TYPE_TABLE] = Buffers.ReadTable,
+	[TYPE_INSTANCE] = Buffers.ReadInstance,
+	[TYPE_VECTOR3] = Buffers.ReadVector3,
+	[TYPE_CFRAME_FULL] = Buffers.ReadCFrame,
+	[TYPE_CFRAME_POS] = function(r) return CFrame.new(Buffers.ReadVector3(r)) end,
+	[TYPE_COLOR3] = Buffers.ReadColor3,
+	[TYPE_BRICKCOLOR] = Buffers.ReadBrickColor,
+	[TYPE_VECTOR2] = Buffers.ReadVector2,
+	[TYPE_ENUM] = Buffers.ReadEnum,
+	[TYPE_UDIM2] = Buffers.ReadUDim2,
+	[TYPE_UDIM] = Buffers.ReadUDim,
+	[TYPE_TWEENINFO] = Buffers.ReadTweenInfo,
+	[TYPE_NIL] = function() return nil end,
+}
+
+function Buffers.WriteAny(w: Writer, v: any)
+	local t = typeof(v)
+	local writer = TypeWriters[t]
+
+	if writer then
+		writer(w, v)
 	else
 		warn("Unsupported type:", t)
 		Buffers.WriteByte(w, TYPE_NIL)
@@ -462,23 +513,10 @@ end
 
 function Buffers.ReadAny(r: Reader): any
 	local t = Buffers.ReadByte(r)
-	if t == TYPE_NUMBER then return Buffers.ReadNumber(r)
-	elseif t == TYPE_INTEGER then return Buffers.ReadZigZag(r)
-	elseif t == TYPE_STRING then return Buffers.ReadString(r)
-	elseif t == TYPE_BOOL_TRUE then return true
-	elseif t == TYPE_BOOL_FALSE then return false
-	elseif t == TYPE_TABLE then return Buffers.ReadTable(r)
-	elseif t == TYPE_INSTANCE then return Buffers.ReadInstance(r)
-	elseif t == TYPE_VECTOR3 then return Buffers.ReadVector3(r)
-	elseif t == TYPE_CFRAME then return Buffers.ReadCFrame(r)
-	elseif t == TYPE_COLOR3 then return Buffers.ReadColor3(r)
-	elseif t == TYPE_BRICKCOLOR then return Buffers.ReadBrickColor(r)
-	elseif t == TYPE_VECTOR2 then return Buffers.ReadVector2(r)
-	elseif t == TYPE_ENUM then return Buffers.ReadEnum(r)
-	elseif t == TYPE_UDIM2 then return Buffers.ReadUDim2(r)
-	elseif t == TYPE_UDIM then return Buffers.ReadUDim(r)
-	elseif t == TYPE_TWEENINFO then return Buffers.ReadTweenInfo(r)
-	elseif t == TYPE_NIL then return nil
+	local reader = TypeReaders[t]
+
+	if reader then
+		return reader(r)
 	else
 		warn("Unknown type tag:", t)
 		return nil
