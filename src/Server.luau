@@ -31,9 +31,9 @@ function Server.new(name: string, config: Config?)
 	self._remote = Remotes.Create(name, config and config.Unreliable)
 	self._outgoing = {} :: {[Player]: Buffers.Writer}
 	self._broadcast = nil :: Buffers.Writer?
-	self._listeners = {} :: { (Player, any) -> () }
+	self._listeners = {} :: {[(Player, ...any) -> ()]: true}
 
-	self.OnInvoke = nil :: ((Player, any) -> any)?
+	self.OnInvoke = nil :: ((Player, ...any) -> ...any)?
 
 	Players.PlayerRemoving:Connect(function(player)
 		if self._outgoing[player] then
@@ -51,21 +51,17 @@ function Server.new(name: string, config: Config?)
 	return self
 end
 
-function Server:Connect(callback: (Player, any) -> ())
-	table.insert(self._listeners, callback)
+function Server:Connect(callback: (Player, ...any) -> ())
+	self._listeners[callback] = true
 
 	return {
 		Disconnect = function()
-			local idx = table.find(self._listeners, callback)
-
-			if idx then 
-				table.remove(self._listeners, idx) 
-			end
-		end
+			self._listeners[callback] = nil
+		end,
 	}
 end
 
-function Server:Fire(player: Player, val: any)
+function Server:Fire(player: Player, ...: any)
 	local w = self._outgoing[player]
 
 	if not w then
@@ -74,10 +70,10 @@ function Server:Fire(player: Player, val: any)
 	end
 
 	Buffers.WriteByte(w, PACKET_EVENT)
-	Buffers.WriteAny(w, val)
+	Buffers.Pack(w, ...)
 end
 
-function Server:FireAll(val: any)
+function Server:FireAll(...: any)
 	local w = self._broadcast
 
 	if not w then
@@ -86,7 +82,7 @@ function Server:FireAll(val: any)
 	end
 
 	Buffers.WriteByte(w, PACKET_EVENT)
-	Buffers.WriteAny(w, val)
+	Buffers.Pack(w, ...)
 end
 
 function Server:_flush()
@@ -113,19 +109,19 @@ function Server:_incoming(player: Player, b: buffer, i: {Instance})
 		local type = Buffers.ReadByte(r)
 
 		if type == PACKET_EVENT then
-			local val = Buffers.ReadAny(r)
-			local listeners = table.clone(self._listeners)
+			local vals = Buffers.Unpack(r)
 
-			for _, cb in ipairs(listeners) do
-				task.spawn(cb, player, val)
+			for cb in pairs(self._listeners) do
+				task.spawn(cb, player, table.unpack(vals))
 			end
 		elseif type == PACKET_REQUEST then
 			local id = Buffers.ReadVarInt(r)
-			local val = Buffers.ReadAny(r)
+			local vals = Buffers.Unpack(r)
 
 			if self.OnInvoke then
 				task.spawn(function()
-					local ok, res = pcall(self.OnInvoke, player, val)
+					local results = {pcall(self.OnInvoke, player, table.unpack(vals))}
+					local ok = results[1]
 					local w = self._outgoing[player]
 
 					if not w then
@@ -133,10 +129,12 @@ function Server:_incoming(player: Player, b: buffer, i: {Instance})
 						self._outgoing[player] = w
 					end
 
+					table.remove(results, 1)
+
 					Buffers.WriteByte(w, PACKET_RESPONSE)
 					Buffers.WriteVarInt(w, id)
 					Buffers.WriteByte(w, ok and 1 or 0)
-					Buffers.WriteAny(w, res)
+					Buffers.Pack(w, table.unpack(results))
 				end)
 			end
 		else
