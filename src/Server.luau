@@ -46,8 +46,6 @@ function Server.new(name: string, config: Config?)
 		self:_incoming(player, buff, insts)
 	end)
 
-	ActiveInstances[self] = true
-
 	return self
 end
 
@@ -67,6 +65,7 @@ function Server:Fire(player: Player, ...: any)
 	if not w then
 		w = Buffers.CreateWriter()
 		self._outgoing[player] = w
+		ActiveInstances[self] = true
 	end
 
 	Buffers.WriteByte(w, PACKET_EVENT)
@@ -79,6 +78,7 @@ function Server:FireAll(...: any)
 	if not w then
 		w = Buffers.CreateWriter()
 		self._broadcast = w
+		ActiveInstances[self] = true
 	end
 
 	Buffers.WriteByte(w, PACKET_EVENT)
@@ -100,6 +100,8 @@ function Server:_flush()
 		Buffers.FreeWriter(self._broadcast)
 		self._broadcast = nil
 	end
+
+	ActiveInstances[self] = nil
 end
 
 function Server:_incoming(player: Player, b: buffer, i: {Instance})

@@ -33,8 +33,6 @@ function Client.new(name: string)
 		self:_incoming(buff, insts)
 	end)
 
-	ActiveInstances[self] = true
-
 	return self
 end
 
@@ -54,6 +52,7 @@ function Client:Fire(...: any)
 	if not w then
 		w = Buffers.CreateWriter()
 		self._outgoing = w
+		ActiveInstances[self] = true
 	end
 
 	Buffers.WriteByte(w, PACKET_EVENT)
@@ -69,6 +68,7 @@ function Client:Invoke(...: any)
 	if not w then
 		w = Buffers.CreateWriter()
 		self._outgoing = w
+		ActiveInstances[self] = true
 	end
 
 	Buffers.WriteByte(w, PACKET_REQUEST)
@@ -101,6 +101,7 @@ function Client:_flush()
 
 		Buffers.FreeWriter(self._outgoing)
 		self._outgoing = nil
+		ActiveInstances[self] = nil
 	end
 end
 

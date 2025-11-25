@@ -87,6 +87,8 @@ end
 function Buffers.FreeWriter(w: Writer)
 	if #writerPool < MAX_POOL_SIZE then
 		w.cursor = 0
+		w.len = INITIAL_BUFFER_SIZE
+		w.buff = buffer_create(INITIAL_BUFFER_SIZE)
 		table.clear(w.refs)
 		table.insert(writerPool, w)
 	end
