@@ -1,7 +1,5 @@
 --!strict
 
-local Jolt = {}
-
 local RunService = game:GetService("RunService")
 
 local IS_SERVER = RunService:IsServer()

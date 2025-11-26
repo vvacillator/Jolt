@@ -7,6 +7,8 @@ local Players = game:GetService("Players")
 local Buffers = require("./Utils/Buffers")
 local Remotes = require("./Utils/Remotes")
 
+local tableunpack = table.unpack
+
 local PACKET_EVENT = 1
 local PACKET_REQUEST = 2
 local PACKET_RESPONSE = 3
@@ -114,7 +116,7 @@ function Server:_incoming(player: Player, b: buffer, i: {Instance})
 			local vals = Buffers.Unpack(r)
 
 			for cb in pairs(self._listeners) do
-				task.spawn(cb, player, table.unpack(vals))
+				task.spawn(cb, player, tableunpack(vals))
 			end
 		elseif type == PACKET_REQUEST then
 			local id = Buffers.ReadVarInt(r)
@@ -122,7 +124,7 @@ function Server:_incoming(player: Player, b: buffer, i: {Instance})
 
 			if self.OnInvoke then
 				task.spawn(function()
-					local results = {pcall(self.OnInvoke, player, table.unpack(vals))}
+					local results = {pcall(self.OnInvoke, player, tableunpack(vals))}
 					local ok = results[1]
 					local w = self._outgoing[player]
 
@@ -136,7 +138,7 @@ function Server:_incoming(player: Player, b: buffer, i: {Instance})
 					Buffers.WriteByte(w, PACKET_RESPONSE)
 					Buffers.WriteVarInt(w, id)
 					Buffers.WriteByte(w, ok and 1 or 0)
-					Buffers.Pack(w, table.unpack(results))
+					Buffers.Pack(w, tableunpack(results))
 				end)
 			end
 		else

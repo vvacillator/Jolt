@@ -5,6 +5,8 @@ Client.__index = Client
 local Buffers = require("./Utils/Buffers")
 local Remotes = require("./Utils/Remotes")
 
+local tableunpack = table.unpack
+
 local PACKET_EVENT = 1
 local PACKET_REQUEST = 2
 local PACKET_RESPONSE = 3
@@ -95,11 +97,12 @@ function Client:Invoke(...: any)
 end
 
 function Client:_flush()
-	if self._outgoing then
-		local b, i = Buffers.Finalize(self._outgoing)
+	local w = self._outgoing
+	if w then
+		local b, i = Buffers.Finalize(w)
 		self._remote:FireServer(b, i)
 
-		Buffers.FreeWriter(self._outgoing)
+		Buffers.FreeWriter(w)
 		self._outgoing = nil
 		ActiveInstances[self] = nil
 	end
@@ -115,7 +118,7 @@ function Client:_incoming(b: buffer, i: {Instance})
 			local vals = Buffers.Unpack(r)
 
 			for cb in pairs(self._listeners) do
-				task.spawn(cb, table.unpack(vals))
+				task.spawn(cb, tableunpack(vals))
 			end
 		elseif type == PACKET_RESPONSE then
 			local id = Buffers.ReadVarInt(r)
@@ -125,7 +128,7 @@ function Client:_incoming(b: buffer, i: {Instance})
 
 			if thread then
 				self._requests[id] = nil
-				task.spawn(thread, ok, table.unpack(vals))
+				task.spawn(thread, ok, tableunpack(vals))
 			end
 		else
 			break

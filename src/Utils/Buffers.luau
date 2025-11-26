@@ -121,7 +121,7 @@ end
 function Buffers.Finalize(w: Writer): (buffer, {Instance})
 	local b = buffer_create(w.cursor)
 	buffer_copy(b, 0, w.buff, 0, w.cursor)
-	return b, table.clone(w.refs) 
+	return b, w.refs
 end
 
 function Buffers.WriteByte(w: Writer, v: number)
@@ -548,9 +548,9 @@ end
 
 function Buffers.Unpack(r: Reader): {any}
 	local n = Buffers.ReadByte(r)
-	local results = {}
-	for _ = 1, n do
-		table.insert(results, Buffers.ReadAny(r))
+	local results = table.create(n)
+	for i = 1, n do
+		results[i] = Buffers.ReadAny(r)
 	end
 	return results
 end
